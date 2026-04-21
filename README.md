@@ -16,3 +16,7 @@ for AI systems in areas such as agriculture, energy, and environment.
 ## Status
 
 Initial setup — Pilot 01 in development.
+
+## Licensing
+
+Licensing approach to be determined. All rights reserved by default.

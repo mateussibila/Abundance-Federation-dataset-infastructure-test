@@ -73,6 +73,7 @@ If you are new, start with:
 - Confirm which team you are on
 - Leave a short progress update on your assigned task
 
-## Decisions Log
+## Project Management
 
-Key decisions are recorded in `docs/decisions.md`.
+- [Decisions Log](docs/decisions.md) — Key decisions and why they were made
+- [Parking Lot](docs/parking-lot.md) — Ideas for future work (not in scope right now)

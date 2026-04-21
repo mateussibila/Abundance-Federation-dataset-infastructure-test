@@ -45,14 +45,12 @@ QA scripting and analysis are parked until domain experts and real data are avai
 
 ## Key Documents
 
-- [Pilot 01 Outline](link-to-google-doc) — What we are building and why
-- [Tooling & Infrastructure Plan](link-to-google-doc) — How we implement it
-- [Crowdsourcing Weed Data](link-to-google-doc) — Background research on data quality
-- [Two-Week Sprint Plan](link-to-google-doc) — Detailed steps for Weeks 2–3
+Core project documents are available in the shared project google drive. 
+Ask the coordinator for access
 
 ## Getting Started
 
-1. Read the key documents linked above
+1. Read the key documents
 2. Check the [Issues](../../issues) tab for your team’s tasks
 3. Filter issues by label: `team:collection` or `team:annotation`
 4. Update your issue with progress comments as you work

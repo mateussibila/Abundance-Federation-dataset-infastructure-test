@@ -9,7 +9,7 @@ from datetime import datetime
 # -----------------------------
 # CONFIG - PATHS BASED ON PROJECT STRUCTURE
 # -----------------------------
-BASE_DIR = Path(__file__).resolve().parents[2]  # Project root
+BASE_DIR = Path(__file__).resolve().parents[3]  # Project root
 PILOT_DIR = "pilot-01"
 
 DATA_DIR = BASE_DIR / PILOT_DIR / "Raw_Uploads" / "exports"
@@ -122,7 +122,7 @@ def download_image(url: str, output_path: Path) -> bool:
         return False
 
 
-def copy_local_image(filename: str, output_path: Path) -> bool:
+def copy_local_image(filename: str, output_path: Path, submission_id: str) -> bool:
     """Recursively search for image under IMAGES_DIR and copy if found"""
     try:
         matches = list(IMAGES_DIR.rglob(filename))
@@ -134,7 +134,8 @@ def copy_local_image(filename: str, output_path: Path) -> bool:
         if len(file_matches) > 1:
             logging.warning(f"Multiple matches for {filename}, using first: {source_path}")
         shutil.copy2(source_path, output_path)
-        logging.info(f"Found and copied local image: {source_path.relative_to(IMAGES_DIR)}")
+        logging.debug(f"Found and copied local image: {source_path.relative_to(IMAGES_DIR)}")
+        logging.info(f"Submission {submission_id} - Successfully saved image as {output_path.name}")
         return True
     except Exception as e:
         logging.error(f"Error copying local image {filename}: {e}")
@@ -360,10 +361,9 @@ def run():
         # Try to get image from local files first
         image_acquired = False
         if pd.notna(photo_filename) and isinstance(photo_filename, str) and photo_filename.strip():
-            if copy_local_image(photo_filename, output_path):
+            if copy_local_image(photo_filename, output_path, submission_id):
                 image_acquired = True
                 images_acquired += 1
-                logging.info(f"Successfully copied local image for {submission_id} as {output_filename}")
             else:
                 logging.warning(f"Local image not found: {photo_filename}")
 

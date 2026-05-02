@@ -88,10 +88,11 @@ def ensure_dirs():
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def download_image(url: str, output_path: Path) -> bool:
+def download_image(url: str, output_path: Path):
     """
     Download image from URL with optional authentication.
     Set KOBO_TOKEN env var for API token auth, or KOBO_SESSION/KOBO_CSRFTOKEN for session auth.
+    Returns (bool, reason) where reason is empty on success, else a string describing failure.
     """
     headers = {}
     token = os.getenv("KOBO_TOKEN")
@@ -109,17 +110,20 @@ def download_image(url: str, output_path: Path) -> bool:
         if response.status_code == 200:
             with open(output_path, "wb") as f:
                 f.write(response.content)
-            return True
+            return True, ""
         else:
-            logging.warning(f"Failed download {url} - status {response.status_code}")
+            # Build reason string
+            reason = f"status {response.status_code}"
             if response.status_code in (401, 403):
-                logging.warning("Authentication required. Set KOBO_TOKEN or KOBO_SESSION/KOBO_CSRFTOKEN.")
+                reason += " - Authentication required. Set KOBO_TOKEN or KOBO_SESSION/KOBO_CSRFTOKEN."
             elif response.status_code == 404:
-                logging.warning("Resource not found - check asset ID and accessibility.")
-            return False
+                reason += " - Resource not found - check asset ID and accessibility."
+            # Log as debug to avoid clutter unless needed
+            logging.debug(f"Failed download {url} - {reason}")
+            return False, reason
     except Exception as e:
-        logging.error(f"Download error {url}: {e}")
-        return False
+        logging.debug(f"Download error {url}: {e}")
+        return False, str(e)
 
 
 def copy_local_image(filename: str, output_path: Path, submission_id: str) -> bool:
@@ -128,6 +132,7 @@ def copy_local_image(filename: str, output_path: Path, submission_id: str) -> bo
         matches = list(IMAGES_DIR.rglob(filename))
         file_matches = [m for m in matches if m.is_file()]
         if not file_matches:
+            logging.warning(f"Submission {submission_id} - Local image not found: {filename} (searched under {IMAGES_DIR})")
             return False
         source_path = file_matches[0]
         if len(file_matches) > 1:
@@ -282,16 +287,27 @@ def run():
 
     # Load existing master tracking (handle empty/corrupt files)
     master_df = pd.DataFrame(columns=MASTER_TRACKING_COLUMNS)
-    if MASTER_TRACKING_PATH.exists():
+    started_fresh = True  # Assume we start fresh unless we successfully load a file
+    REPORTS_DIR = BASE_DIR / PILOT_DIR / "Reports"
+    csv_files = list(REPORTS_DIR.glob("*.csv"))
+    if len(csv_files) == 1:
+        candidate_path = csv_files[0]
         try:
-            if MASTER_TRACKING_PATH.stat().st_size > 0:
-                master_df = pd.read_csv(MASTER_TRACKING_PATH)
-                logging.info(f"Loaded existing master tracking with {len(master_df)} records")
+            if candidate_path.stat().st_size > 0:
+                df_candidate = pd.read_csv(candidate_path)
+                # Check if columns match (order independent)
+                if set(df_candidate.columns) == set(MASTER_TRACKING_COLUMNS):
+                    master_df = df_candidate
+                    logging.info(f"Loaded existing master tracking from '{candidate_path.name}' with {len(master_df)} records")
+                    started_fresh = False  # Successfully loaded a file
+                else:
+                    logging.warning(f"File '{candidate_path.name}' has mismatched columns. Expected: {MASTER_TRACKING_COLUMNS}, got: {list(df_candidate.columns)}. Starting fresh.")
             else:
                 logging.info("Master tracking file exists but is empty, starting fresh")
         except Exception as e:
-            logging.warning(f"Could not read master tracking file: {e}. Starting fresh.")
-            master_df = pd.DataFrame(columns=MASTER_TRACKING_COLUMNS)
+            logging.warning(f"Could not read master tracking file '{candidate_path.name}': {e}. Starting fresh.")
+    elif len(csv_files) > 1:
+        logging.warning(f"Found {len(csv_files)} CSV files in Reports directory. Expected exactly one. Starting fresh.")
     else:
         logging.info("No master tracking file found, starting fresh")
 
@@ -301,6 +317,7 @@ def run():
     images_acquired = 0
     sequence_counter = {}  # Track sequence numbers per (farm, volunteer)
     existing_filenames = set(master_df.get("filename", []))
+    failed_submissions = []  # List of submission IDs that failed to acquire an image
 
     for _, row in df.iterrows():
         submission_id = row.get("_id")
@@ -364,18 +381,24 @@ def run():
                 image_acquired = True
                 images_acquired += 1
             else:
-                logging.warning(f"Local image not found: {photo_filename}")
+                # copy_local_image already logged the warning with submission ID
+                pass
 
         # If not found locally, try downloading from URL
         if not image_acquired:
-            logging.info(f"Attempting to download from Kobo URL for submission {submission_id}")
-            success = download_image(photo_url, output_path)
-            if success:
-                image_acquired = True
-                images_acquired += 1
-                logging.info(f"Successfully downloaded image for {submission_id} as {output_filename}")
+            token = os.getenv("KOBO_TOKEN")
+            if not token:
+                logging.warning(f"Submission {submission_id} - KOBO_TOKEN not set – skipping download")
+                # treat as failure, will be added to failed_submissions later
             else:
-                logging.warning(f"Failed to download image from URL for {submission_id}")
+                logging.info(f"Attempting to download from Kobo URL for submission {submission_id}")
+                success, reason = download_image(photo_url, output_path)
+                if success:
+                    image_acquired = True
+                    images_acquired += 1
+                    logging.info(f"Submission {submission_id} - Successfully saved image as {output_filename}")
+                else:
+                    logging.warning(f"Submission {submission_id} - Failed to download image from URL: {reason}")
 
         # Record row in master tracking (per Task A6 column spec)
         tracking_row = {
@@ -395,12 +418,24 @@ def run():
         existing_filenames.add(output_filename)
         processed += 1
 
+        if not image_acquired:
+            failed_submissions.append(str(submission_id))
+
         if processed % 10 == 0:
             logging.info(f"📈 Progress: {processed} processed, {skipped} skipped, {errors} errors, {images_acquired} images acquired")
 
     master_df = master_df.reindex(columns=MASTER_TRACKING_COLUMNS)
     master_df.to_csv(MASTER_TRACKING_PATH, index=False)
     logging.info(f"Pipeline completed: {processed} submissions processed, {skipped} skipped, {errors} errors, {images_acquired} images acquired")
+    if started_fresh:
+        logging.info(f"Processed data saved to: {MASTER_TRACKING_PATH}")
+
+    if failed_submissions:
+        logging.warning("The following submissions did NOT acquire an image:")
+        for fid in failed_submissions:
+            logging.warning(f"- {fid}")
+    else:
+        logging.info("All submissions acquired an image successfully.")
 
 
 if __name__ == "__main__":

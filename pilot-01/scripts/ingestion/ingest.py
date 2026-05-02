@@ -128,11 +128,10 @@ def copy_local_image(filename: str, output_path: Path, submission_id: str) -> bo
         matches = list(IMAGES_DIR.rglob(filename))
         file_matches = [m for m in matches if m.is_file()]
         if not file_matches:
-            logging.warning(f"Local image not found: {filename} (searched under {IMAGES_DIR})")
             return False
         source_path = file_matches[0]
         if len(file_matches) > 1:
-            logging.warning(f"Multiple matches for {filename}, using first: {source_path}")
+            logging.debug(f"Multiple matches for {filename}, using first: {source_path}")
         shutil.copy2(source_path, output_path)
         logging.debug(f"Found and copied local image: {source_path.relative_to(IMAGES_DIR)}")
         logging.info(f"Submission {submission_id} - Successfully saved image as {output_path.name}")

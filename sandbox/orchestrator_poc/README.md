@@ -28,7 +28,7 @@ python demo_app.py
 
 Default demo task: **`TASK-0002`** (fresh ref for recording; change in `poc_service.py` if needed).
 
-Buttons map 1:1 to the CLI flow. Use **Force re-import** on pull if re-recording over the same task.
+Buttons map to the demo flow. Annotations import automatically when the CVAT job is marked **completed** (no manual Pull button).
 
 ## Commands (CLI)
 
@@ -92,15 +92,18 @@ If port 5050 is busy: `lsof -ti :5050 | xargs kill -9`
 1. **Initialize** — create SQLite schema (POC only)
 2. **Register image** — local `images` row (no CVAT yet)
 3. **Push to CVAT** — creates task + uploads image
-4. **Open CVAT** — annotate in browser
-5. **Pull annotations** — COCO export → normalized `Annotation`
-6. **Reset all** — wipe local SQLite + activity log (CVAT tasks stay)
+4. **Enable webhook** — registers CVAT `update:job` → Orchestrator (once per project)
+5. **Open CVAT** — annotate, Save, then **Menu → Change job state → completed**
+6. Orchestrator **auto-pulls** COCO (activity log updates within ~2s; manual Pull still available)
+7. **Reset all** — wipe local SQLite + activity log **and delete all tasks** in the CVAT sandbox project
 
-Use **Force re-import** on pull when re-recording over the same task.
+Production rule: webhook fires on many job updates, but Orchestrator only pulls when **state → completed**. Save alone does not pull.
+
+Webhook URL (CVAT Docker → Mac): `http://host.docker.internal:5050/api/webhooks/cvat`
 
 ### 5. Fresh task ref
 
-Default demo task is **`TASK-0002`** (`poc_service.py`). If push fails with “task ref already exists”, bump to `TASK-0003` or click **Reset all** and use a new ref.
+Default demo task refs auto-increment (`TASK-0001`, `TASK-0002`, …) from local DB + CVAT project names. After **Reset all**, the next push starts again at **`TASK-0001`**.
 
 ### Files
 

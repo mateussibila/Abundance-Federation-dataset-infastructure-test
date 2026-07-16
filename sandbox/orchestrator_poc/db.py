@@ -103,6 +103,13 @@ class Database:
                 (task_ref,),
             ).fetchone()
 
+    def get_task_by_external_id(self, external_task_id: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM tasks WHERE external_task_id = ?",
+                (str(external_task_id),),
+            ).fetchone()
+
     def create_task(
         self,
         task_ref: str,

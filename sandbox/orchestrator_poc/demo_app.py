@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -14,15 +16,23 @@ from poc_service import (
     DEMO_IMAGE_PATH,
     DEMO_METADATA,
     DEMO_TASK_REF,
+    DEFAULT_WEBHOOK_TARGET,
     PocError,
     PocSettings,
+    active_demo_task_ref,
     demo_state,
     entity_changes_for_action,
     get_entities,
     get_status,
+    get_webhook_feed,
+    handle_cvat_webhook,
     init_poc,
+    list_cvat_webhooks,
+    next_demo_task_ref,
+    poll_completed_jobs,
     pull_from_cvat,
     push_to_cvat,
+    register_cvat_webhook,
     reset_all,
     seed_image,
 )
@@ -47,44 +57,20 @@ PAGE = """
       --ok: #22c55e;
       --warn: #f59e0b;
       --err: #ef4444;
-      --sidebar-w: 280px;
       --entities-w: 360px;
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
     header {
       padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
-      display: flex; align-items: center; gap: 14px;
     }
-    header .title-block { flex: 1; min-width: 0; }
     header h1 { margin: 0; font-size: 1.1rem; }
     header p { margin: 4px 0 0; color: var(--muted); font-size: 0.82rem; }
-    .header-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
     .layout {
       display: grid;
-      grid-template-columns: var(--sidebar-w) 1fr var(--entities-w);
+      grid-template-columns: 1fr var(--entities-w);
       min-height: calc(100vh - 72px);
-      transition: grid-template-columns 0.2s ease;
     }
-    .layout.sidebar-collapsed { grid-template-columns: 52px 1fr var(--entities-w); }
-    .sidebar {
-      border-right: 1px solid var(--border); background: #121820;
-      overflow: hidden; transition: width 0.2s ease;
-    }
-    .sidebar-inner { padding: 16px; width: var(--sidebar-w); }
-    .layout.sidebar-collapsed .sidebar-inner { padding: 12px 8px; width: 52px; }
-    .layout.sidebar-collapsed .step-text { display: none; }
-    .layout.sidebar-collapsed .sidebar-title { display: none; }
-    .sidebar-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 12px; }
-    .step { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
-    .step-num {
-      width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-      font-size: 0.75rem; font-weight: 700; background: var(--border); flex-shrink: 0;
-    }
-    .step.done .step-num { background: var(--ok); color: #052e16; }
-    .step.active .step-num { background: var(--accent); color: white; }
-    .step-title { font-weight: 600; font-size: 0.88rem; }
-    .step-desc { color: var(--muted); font-size: 0.76rem; margin-top: 2px; line-height: 1.3; }
     .center { padding: 20px; overflow: auto; min-width: 0; }
     .entities {
       border-left: 1px solid var(--border); background: #101722;
@@ -103,7 +89,6 @@ PAGE = """
       font-size: 0.85rem; font-weight: 600; cursor: pointer; background: var(--accent); color: white;
       text-decoration: none; display: inline-block;
     }
-    button.icon { padding: 8px 10px; min-width: 36px; background: #334155; }
     button.danger { background: #991b1b; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     button.busy { opacity: 0.7; }
@@ -139,55 +124,142 @@ PAGE = """
     .activity-item {
       border-left: 3px solid var(--accent); padding: 6px 0 6px 10px; margin-bottom: 8px; font-size: 0.78rem;
     }
+    .activity-item.latest-batch { border-left-color: var(--ok); }
     .activity-item .when { color: var(--muted); font-size: 0.68rem; }
     .activity-item .what { margin-top: 2px; font-weight: 600; }
     .activity-item .detail { margin-top: 6px; color: var(--muted); font-size: 0.74rem; line-height: 1.45; font-weight: 400; }
     .empty { color: var(--muted); font-size: 0.78rem; font-style: italic; }
     .entity-count { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .summary-box {
+      background: #0b1020;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 110px;
+    }
+    .summary-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    .summary-box .title { font-weight: 700; font-size: 0.85rem; word-break: break-all; }
+    .summary-box .body { margin-top: 6px; color: var(--muted); font-size: 0.74rem; line-height: 1.4; }
+    .summary-box .when { margin-top: 8px; color: var(--muted); font-size: 0.68rem; }
+    .summary-box .state { color: #86efac; font-weight: 600; }
+    .state-flow {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      margin: 10px 0 4px;
+    }
+    .state-flow .flow-arrow {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.7rem;
+      line-height: 1.1;
+      padding: 2px 0;
+      user-select: none;
+    }
+    .state-flow .flow-step {
+      text-align: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1.5px solid #64748b;
+      color: #e2e8f0;
+      background: transparent;
+      transition: border-color 0.25s, color 0.25s, background 0.25s, box-shadow 0.25s;
+    }
+    .state-flow .flow-step.upcoming {
+      border-color: #64748b;
+      color: #cbd5e1;
+      opacity: 0.85;
+    }
+    .state-flow .flow-step.done {
+      border-color: #166534;
+      color: #86efac;
+      background: rgba(22, 101, 52, 0.15);
+    }
+    .state-flow .flow-step.current {
+      border-color: #22c55e;
+      color: #86efac;
+      background: rgba(34, 197, 94, 0.12);
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.25);
+    }
+    @media (max-width: 1100px) {
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      .summary-grid { grid-template-columns: 1fr; }
+      .layout { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <div class="header-actions">
-      <button class="icon secondary" id="toggle-sidebar" title="Toggle steps panel">☰</button>
-    </div>
-    <div class="title-block">
-      <h1>Orchestrator ↔ CVAT — API Demo</h1>
-      <p>Local POC · REST API · CVAT window beside this for recording</p>
-    </div>
+    <h1>Orchestrator ↔ CVAT — API Demo</h1>
+    <p>Local POC · REST API · CVAT window beside this for recording</p>
   </header>
 
   <div class="layout" id="layout">
-    <aside class="sidebar">
-      <div class="sidebar-inner">
-        <div class="sidebar-title">Workflow steps</div>
-        <div id="steps"></div>
-      </div>
-    </aside>
-
     <section class="center">
       <div class="card">
         <h2>Demo defaults</h2>
         <dl class="meta">
           <dt>Image ID</dt><dd id="demo-image-id"></dd>
           <dt>Task ref</dt><dd id="demo-task-ref"></dd>
+          <dt>Webhook</dt><dd id="webhook-status">—</dd>
           <dt>CVAT link</dt><dd id="handoff-link">—</dd>
           <dt>Labels</dt><dd><span class="badge" id="labels-badge">—</span></dd>
         </dl>
       </div>
       <div class="card">
+        <h2>Entity summaries</h2>
+        <div class="summary-grid">
+          <div class="summary-box" id="summary-image">
+            <h3>Image</h3>
+            <div class="empty">—</div>
+          </div>
+          <div class="summary-box" id="summary-task">
+            <h3>Task</h3>
+            <div class="empty">—</div>
+          </div>
+          <div class="summary-box" id="summary-task-image">
+            <h3>TaskImage</h3>
+            <div class="empty">—</div>
+          </div>
+          <div class="summary-box" id="summary-annotation">
+            <h3>Annotation</h3>
+            <div class="empty">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
         <h2>Actions</h2>
         <div class="actions">
-          <button onclick="run('init')">1 · Initialize</button>
-          <button onclick="run('seed')">2 · Register image</button>
-          <button onclick="run('push')">3 · Push to CVAT</button>
+          <button type="button" data-action="init">1 · Initialize</button>
+          <button type="button" data-action="seed">2 · Register image</button>
+          <button type="button" data-action="push">3 · Push to CVAT</button>
           <a class="link-btn secondary" id="btn-open-cvat" href="#" target="_blank" rel="noopener">4 · Open CVAT ↗</a>
-          <button onclick="run('pull')">5 · Pull annotations</button>
-          <button class="secondary" onclick="run('status')">6 · Refresh</button>
-          <button class="danger secondary" onclick="runReset()">Reset all</button>
+          <button type="button" class="secondary" data-action="status">5 · Refresh</button>
+          <button type="button" class="danger secondary" id="btn-reset">Reset all</button>
         </div>
-        <label class="force"><input type="checkbox" id="force-pull" /> Force re-import on pull</label>
-        <p class="note">Step 4: annotate in CVAT (rectangle + Save). Step 5 imports COCO back.</p>
+        <p class="note">
+          After annotate: Menu → Change job state → <strong>completed</strong>.
+          Orchestrator auto-pulls (poller every few seconds; webhook endpoint also ready for production).
+          On Docker Desktop for Mac, CVAT webhooks to private IPs are blocked — the poller is the sandbox workaround.
+          Save alone does not pull — only job completed.
+          <strong>Refresh</strong> reloads local entities + live CVAT status (read-only; does not import annotations).
+        </p>
       </div>
       <div class="card">
         <h2>Last action result</h2>
@@ -212,32 +284,150 @@ PAGE = """
   </div>
 
   <script>
-    const STEPS = [
-      { id: 'init', title: 'Initialize', desc: 'Create local SQLite (POC only)' },
-      { id: 'seed', title: 'Register image', desc: 'Store image in Orchestrator' },
-      { id: 'push', title: 'Push to CVAT', desc: 'API: create task + upload' },
-      { id: 'cvat', title: 'Annotate in CVAT', desc: 'Manual step in browser' },
-      { id: 'pull', title: 'Pull annotations', desc: 'API: export COCO + normalize' },
-      { id: 'status', title: 'Status', desc: 'Verify labels imported' },
-    ];
-
     let state = {};
     let entities = {};
     let activityLog = [];
     let highlightKeys = new Set();
     let busy = false;
+    let busyTimer = null;
+    let lastWebhookFeedId = 0;
+    const seenWebhookEventIds = new Set();
+    let feedPollInFlight = false;
 
-    document.getElementById('toggle-sidebar').addEventListener('click', () => {
-      document.getElementById('layout').classList.toggle('sidebar-collapsed');
+    function setBusy(on) {
+      busy = on;
+      if (busyTimer) { clearTimeout(busyTimer); busyTimer = null; }
+      document.querySelectorAll('button').forEach(b => {
+        if (on) b.classList.add('busy'); else b.classList.remove('busy');
+        b.disabled = !!on;
+      });
+      if (on) {
+        busyTimer = setTimeout(() => {
+          busy = false;
+          document.querySelectorAll('button').forEach(b => {
+            b.classList.remove('busy');
+            b.disabled = false;
+          });
+          const out = document.getElementById('output');
+          out.textContent = (out.textContent || '') + "\\n[timeout] Buttons re-enabled.";
+          out.style.color = '#fca5a5';
+        }, 30000);
+      }
+    }
+
+    document.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => run(btn.getAttribute('data-action')));
     });
+    document.getElementById('btn-reset').addEventListener('click', () => runReset());
 
-    function renderSteps() {
-      const done = state.completed || {};
-      const active = state.next || 'init';
-      document.getElementById('steps').innerHTML = STEPS.map((s, i) => {
-        const cls = done[s.id] ? 'done' : (s.id === active ? 'active' : '');
-        return `<div class="step ${cls}"><div class="step-num">${i+1}</div><div class="step-text"><div class="step-title">${s.title}</div><div class="step-desc">${s.desc}</div></div></div>`;
-      }).join('');
+    function shortTime(isoOrLocal) {
+      if (!isoOrLocal) return '';
+      try {
+        const d = new Date(isoOrLocal.includes('T') || isoOrLocal.includes('Z')
+          ? (isoOrLocal.endsWith('Z') || isoOrLocal.includes('+') ? isoOrLocal : isoOrLocal + 'Z')
+          : isoOrLocal);
+        if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString();
+      } catch (_) {}
+      return String(isoOrLocal).slice(0, 19);
+    }
+
+    function setSummary(id, html) {
+      const el = document.getElementById(id);
+      const title = el.querySelector('h3');
+      el.innerHTML = '';
+      el.appendChild(title);
+      const wrap = document.createElement('div');
+      wrap.innerHTML = html;
+      while (wrap.firstChild) el.appendChild(wrap.firstChild);
+    }
+
+    function stateFlowHtml(steps, currentKey) {
+      const idx = steps.findIndex(s => s.key === currentKey);
+      const active = idx < 0 ? 0 : idx;
+      return `<div class="state-flow">${steps.map((s, i) => {
+        let cls = 'upcoming';
+        if (i < active) cls = 'done';
+        else if (i === active) cls = 'current';
+        const arrow = i < steps.length - 1 ? '<div class="flow-arrow">↓</div>' : '';
+        return `<div class="flow-step ${cls}">${s.label}</div>${arrow}`;
+      }).join('')}</div>`;
+    }
+
+    const IMAGE_FLOW = [
+      { key: 'validated', label: 'validated' },
+      { key: 'queued_for_annotation', label: 'queued' },
+      { key: 'annotated', label: 'annotated' },
+    ];
+    const TASK_FLOW = [
+      { key: 'created', label: 'created' },
+      { key: 'annotated', label: 'annotated' },
+    ];
+
+    function renderSummaries() {
+      const e = entities;
+      const imgs = e.images || [];
+      const tasks = e.tasks || [];
+      const links = e.task_images || [];
+      const anns = e.annotations || [];
+
+      if (!imgs.length) {
+        setSummary('summary-image', '<div class="empty">—</div>');
+      } else {
+        const r = imgs[imgs.length - 1];
+        let body = 'This simulates one image that has been ingested from Kobo, processed and stored.';
+        if (r.workflow_state === 'queued_for_annotation') {
+          body = 'Queued for annotation in CVAT after push. Metadata stays in Orchestrator only.';
+        } else if (r.workflow_state === 'annotated') {
+          body = 'Marked annotated after job completed → auto-pull imported labels.';
+        }
+        setSummary('summary-image', `
+          <div class="title">${r.citizen_ai_image_id}</div>
+          ${stateFlowHtml(IMAGE_FLOW, r.workflow_state || 'validated')}
+          <div class="body">${body}</div>
+          <div class="when">${shortTime(r.created_at)}</div>
+        `);
+      }
+
+      if (!tasks.length) {
+        setSummary('summary-task', '<div class="empty">—</div>');
+      } else {
+        const r = tasks[tasks.length - 1];
+        let body = `CVAT task #${r.external_task_id || '—'} · created for annotation handoff.`;
+        if (r.status === 'annotated') {
+          body = `CVAT task #${r.external_task_id || '—'} · status annotated after auto-pull.`;
+        }
+        setSummary('summary-task', `
+          <div class="title">${r.task_ref}</div>
+          ${stateFlowHtml(TASK_FLOW, r.status || 'created')}
+          <div class="body">${body}</div>
+          <div class="when">${shortTime(r.created_at)}</div>
+        `);
+      }
+
+      if (!links.length) {
+        setSummary('summary-task-image', '<div class="empty">—</div>');
+      } else {
+        const r = links[links.length - 1];
+        setSummary('summary-task-image', `
+          <div class="title">${r.task_ref} ↔ ${r.citizen_ai_image_id}</div>
+          <div class="body">Junction row linking the Orchestrator task to this image. No status column — unchanged after pull.</div>
+          <div class="when">${shortTime(r.created_at) || 'linked on push'}</div>
+        `);
+      }
+
+      if (!anns.length) {
+        const waiting = tasks.length
+          ? '<div class="empty">Not yet — waiting for CVAT job completed</div>'
+          : '<div class="empty">—</div>';
+        setSummary('summary-annotation', waiting);
+      } else {
+        const r = anns[anns.length - 1];
+        setSummary('summary-annotation', `
+          <div class="title">${r.citizen_ai_image_id} <span class="state">${r.labels_count ?? '?'} labels</span></div>
+          <div class="body">Created on auto-pull after job completed (${r.export_format || 'COCO'}).</div>
+          <div class="when">${shortTime(r.created_at)}</div>
+        `);
+      }
     }
 
     function entityKey(table, row) {
@@ -302,13 +492,20 @@ PAGE = """
         el.innerHTML = '<div class="empty">Run an action to see records created.</div>';
         return;
       }
-      el.innerHTML = activityLog.slice().reverse().map(item => `
-        <div class="activity-item">
+      const items = activityLog.slice().reverse();
+      const latestWhen = items[0]?.when;
+      let inLatestBatch = true;
+      el.innerHTML = items.map(item => {
+        if (item.when !== latestWhen) inLatestBatch = false;
+        const latest = inLatestBatch ? ' latest-batch' : '';
+        return `
+        <div class="activity-item${latest}">
           <div class="when">${item.when} · ${item.action}</div>
           <div class="what">${item.entity} — ${item.summary}</div>
           ${item.detail ? `<div class="detail">${item.detail}</div>` : ''}
         </div>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function applyHighlightKeys(changes) {
@@ -340,6 +537,13 @@ PAGE = """
       }
       document.getElementById('demo-image-id').textContent = state.demo?.image_id || '—';
       document.getElementById('demo-task-ref').textContent = state.demo?.task_ref || '—';
+      const wh = state.webhook;
+      const whEl = document.getElementById('webhook-status');
+      if (wh?.is_active) {
+        whEl.innerHTML = `<span class="badge ok">on · #${wh.id}</span> <span style="color:var(--muted);font-size:0.75rem">job→completed · always on</span>`;
+      } else {
+        whEl.innerHTML = '<span class="badge warn">registering…</span> <span style="color:var(--muted);font-size:0.75rem">auto on init / startup</span>';
+      }
       const task = state.task?.task;
       const handoff = task?.handoff_url;
       const linkEl = document.getElementById('handoff-link');
@@ -359,8 +563,8 @@ PAGE = """
         badge.className = 'badge ' + (labels > 0 ? 'ok' : 'warn');
         big.textContent = labels > 0 ? `labels = ${labels}` : '';
       }
-      renderSteps();
       renderEntities();
+      renderSummaries();
       renderActivity();
       if (payload.changes) applyHighlightKeys(payload.changes);
     }
@@ -371,54 +575,116 @@ PAGE = """
     }
 
     async function run(action) {
-      if (busy) return;
-      busy = true;
-      document.querySelectorAll('button').forEach(b => b.classList.add('busy'));
-      document.getElementById('output').textContent = 'Running ' + action + '...';
+      if (busy) {
+        document.getElementById('output').textContent = 'Still running previous action…';
+        return;
+      }
+      setBusy(true);
+      const out = document.getElementById('output');
+      out.style.color = '';
+      out.textContent = 'Running ' + action + '...';
       try {
         const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
-        if (action === 'pull') opts.body = JSON.stringify({ force: document.getElementById('force-pull').checked });
         const res = await fetch('/api/' + action, action === 'status' ? { method: 'GET' } : opts);
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Request failed');
-        document.getElementById('output').textContent = JSON.stringify(data.data, null, 2);
+        out.textContent = JSON.stringify(data.data, null, 2);
         updateUi({ ...data, lastAction: action });
       } catch (err) {
-        document.getElementById('output').textContent = String(err);
-        document.getElementById('output').style.color = '#fca5a5';
+        out.textContent = String(err);
+        out.style.color = '#fca5a5';
       } finally {
-        busy = false;
-        document.querySelectorAll('button').forEach(b => b.classList.remove('busy'));
+        setBusy(false);
       }
     }
 
     async function runReset() {
-      if (busy) return;
-      if (!confirm('Clear all Orchestrator records (images, tasks, annotations)? CVAT tasks are not deleted.')) return;
-      busy = true;
-      document.querySelectorAll('button').forEach(b => b.classList.add('busy'));
+      if (busy) {
+        document.getElementById('output').textContent = 'Still running previous action…';
+        return;
+      }
+      setBusy(true);
+      const out = document.getElementById('output');
+      out.style.color = '';
+      out.textContent = 'Resetting Orchestrator DB + deleting CVAT project tasks…';
       try {
         const res = await fetch('/api/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'Reset failed');
         activityLog = [];
-        highlightKeys.clear();
+        seenWebhookEventIds.clear();
+        lastWebhookFeedId = 0;
         document.getElementById('labels-big').textContent = '';
         document.getElementById('labels-badge').textContent = '—';
         document.getElementById('labels-badge').className = 'badge';
         document.getElementById('handoff-link').textContent = '—';
         document.getElementById('btn-open-cvat').href = '#';
-        document.getElementById('output').textContent = JSON.stringify(data.data, null, 2);
+        out.textContent = JSON.stringify(data.data, null, 2);
         updateUi({ ...data, lastAction: 'reset' });
       } catch (err) {
-        document.getElementById('output').textContent = String(err);
+        out.textContent = String(err);
+        out.style.color = '#fca5a5';
       } finally {
-        busy = false;
-        document.querySelectorAll('button').forEach(b => b.classList.remove('busy'));
+        setBusy(false);
       }
     }
 
-    refreshState().then(updateUi);
+    async function pollWebhookFeed() {
+      if (feedPollInFlight) return;
+      feedPollInFlight = true;
+      try {
+        const res = await fetch('/api/webhooks/feed?after_id=' + lastWebhookFeedId);
+        const data = await res.json();
+        if (!data.ok) return;
+        const events = data.events || [];
+        if (!events.length) return;
+        for (const ev of events) {
+          const eid = Number(ev.id) || 0;
+          if (!eid || seenWebhookEventIds.has(eid)) {
+            lastWebhookFeedId = Math.max(lastWebhookFeedId, eid);
+            continue;
+          }
+          seenWebhookEventIds.add(eid);
+          lastWebhookFeedId = Math.max(lastWebhookFeedId, eid);
+          const changes = data.changes_by_id?.[String(eid)] || data.changes_by_id?.[eid] || [{
+            entity: 'Webhook',
+            summary: `${ev.event} → ${ev.action}`,
+            detail: ev.reason || JSON.stringify(ev.pull || {}),
+          }];
+          updateUi({
+            state: data.state,
+            entities: data.entities,
+            changes,
+            lastAction: 'webhook',
+          });
+          if (ev.action === 'auto_pull') {
+            document.getElementById('output').textContent = JSON.stringify(ev, null, 2);
+            document.getElementById('output').style.color = '';
+          }
+        }
+      } catch (_) { /* ignore poll errors */ }
+      finally {
+        feedPollInFlight = false;
+      }
+    }
+
+    window.run = run;
+    window.runReset = runReset;
+    refreshState().then(payload => {
+      updateUi(payload);
+      const feed = payload.state?.webhook_feed || [];
+      for (const e of feed) {
+        const eid = Number(e.id) || 0;
+        if (eid) {
+          seenWebhookEventIds.add(eid);
+          lastWebhookFeedId = Math.max(lastWebhookFeedId, eid);
+        }
+      }
+    }).catch(err => {
+      document.getElementById('output').textContent = 'Failed to load state: ' + err;
+      document.getElementById('output').style.color = '#fca5a5';
+    });
+    setInterval(pollWebhookFeed, 2000);
   </script>
 </body>
 </html>
@@ -487,6 +753,11 @@ def api_state():
 def api_init():
     try:
         data = init_poc(SETTINGS)
+        try:
+            wh = register_cvat_webhook(target_url=DEFAULT_WEBHOOK_TARGET, settings=SETTINGS)
+            data["webhook"] = wh
+        except Exception as wh_exc:  # noqa: BLE001
+            data["webhook"] = {"error": str(wh_exc), "is_active": False}
         state = demo_state(SETTINGS)
         return jsonify(_full_payload("init", data, state))
     except Exception as exc:  # noqa: BLE001
@@ -515,7 +786,7 @@ def api_push():
     try:
         data = push_to_cvat(
             image_id=DEMO_IMAGE_ID,
-            task_ref=DEMO_TASK_REF,
+            task_ref=next_demo_task_ref(SETTINGS),
             settings=SETTINGS,
         )
         state = demo_state(SETTINGS)
@@ -531,7 +802,7 @@ def api_pull():
     try:
         body = request.get_json(silent=True) or {}
         data = pull_from_cvat(
-            task_ref=DEMO_TASK_REF,
+            task_ref=active_demo_task_ref(SETTINGS),
             force=bool(body.get("force")),
             settings=SETTINGS,
         )
@@ -553,10 +824,64 @@ def api_reset():
         return jsonify({"ok": False, "error": str(exc), "trace": traceback.format_exc()}), 500
 
 
+@app.post("/api/webhooks/register")
+def api_webhooks_register():
+    try:
+        data = register_cvat_webhook(target_url=DEFAULT_WEBHOOK_TARGET, settings=SETTINGS)
+        state = demo_state(SETTINGS)
+        return jsonify(_full_payload("register_webhook", data, state))
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc), "trace": traceback.format_exc()}), 500
+
+
+@app.get("/api/webhooks/feed")
+def api_webhooks_feed():
+    try:
+        after_id = int(request.args.get("after_id") or 0)
+        events = get_webhook_feed(after_id=after_id)
+        state = demo_state(SETTINGS)
+        changes_by_id = {
+            str(ev["id"]): entity_changes_for_action("webhook", ev) for ev in events
+        }
+        return jsonify(
+            {
+                "ok": True,
+                "events": events,
+                "changes_by_id": changes_by_id,
+                "state": {**state, "completed": _completed_flags(state), "next": _next_step(_completed_flags(state))},
+                "entities": get_entities(SETTINGS),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc), "trace": traceback.format_exc()}), 500
+
+
+@app.post("/api/webhooks/cvat")
+def api_webhooks_cvat():
+    """CVAT → Orchestrator webhook receiver (job completed → auto-pull)."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        result = handle_cvat_webhook(payload, settings=SETTINGS, force_pull=True)
+        # Always 200 so CVAT does not retry forever on ignored events.
+        return jsonify({"ok": True, "result": result}), 200
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/webhooks")
+def api_webhooks_list():
+    try:
+        data = list_cvat_webhooks(SETTINGS)
+        return jsonify({"ok": True, "data": data})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc), "trace": traceback.format_exc()}), 500
+
+
 @app.get("/api/status")
 def api_status():
     try:
-        data = get_status(task_ref=DEMO_TASK_REF, settings=SETTINGS)
+        data = get_status(task_ref=active_demo_task_ref(SETTINGS), settings=SETTINGS)
         state = demo_state(SETTINGS)
         return jsonify(_full_payload("status", data, state))
     except Exception as exc:  # noqa: BLE001
@@ -566,5 +891,24 @@ def api_status():
 if __name__ == "__main__":
     init_poc(SETTINGS)
     print("Demo UI: http://127.0.0.1:5050")
-    print(f"Demo task ref: {DEMO_TASK_REF}")
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    print(f"Next demo task ref: {next_demo_task_ref(SETTINGS)}")
+    print(f"Webhook target (from CVAT Docker): {DEFAULT_WEBHOOK_TARGET}")
+    try:
+        wh = register_cvat_webhook(target_url=DEFAULT_WEBHOOK_TARGET, settings=SETTINGS)
+        print(f"Webhook always-on: #{wh.get('webhook_id')} → {wh.get('target_url')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Webhook auto-register skipped: {exc}")
+
+    def _poll_loop() -> None:
+        # Wait for app listen; then poll CVAT job completion (Mac webhook workaround).
+        time.sleep(3)
+        while True:
+            try:
+                poll_completed_jobs(settings=SETTINGS, force_pull=False)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[poller] {exc}")
+            time.sleep(4)
+
+    threading.Thread(target=_poll_loop, name="cvat-complete-poller", daemon=True).start()
+    # 0.0.0.0 so other containers / host mapping can reach us
+    app.run(host="0.0.0.0", port=5050, debug=False, threaded=True)

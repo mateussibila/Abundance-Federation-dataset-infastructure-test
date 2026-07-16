@@ -1,0 +1,37 @@
+# Join the existing CVAT Compose network so webhooks avoid Docker Desktop
+# "Deny: Private Range" blocks to host.docker.internal.
+#
+# Usage (with CVAT already up):
+#   cd dataset-infastructure-test/sandbox
+#   docker compose -f docker-compose.orchestrator.yml up -d --build
+#
+# UI: http://127.0.0.1:5050
+# Webhook target (from CVAT): http://orchestrator_poc:5050/api/webhooks/cvat
+
+services:
+  orchestrator_poc:
+    build:
+      context: ./orchestrator_poc
+      dockerfile: Dockerfile
+    container_name: orchestrator_poc
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./orchestrator_poc:/app
+      - ./cvat-dummy-images:/data/cvat-dummy-images:ro
+      - ./cvat-sandbox-info.json:/data/cvat-sandbox-info.json:ro
+    environment:
+      CVAT_CONFIG: /data/cvat-sandbox-info.json
+      CVAT_API_BASE_URL: http://cvat_server:8080
+      CVAT_PUBLIC_BASE_URL: http://localhost:8080
+      WEBHOOK_TARGET_URL: http://orchestrator_poc:5050/api/webhooks/cvat
+      DEMO_IMAGE_PATH: /data/cvat-dummy-images/sandbox_farmA_vol001_20250713_topdown_01.jpg
+    networks:
+      cvat_cvat:
+        ipv4_address: 172.18.0.50
+    restart: unless-stopped
+
+networks:
+  cvat_cvat:
+    external: true
+    name: cvat_cvat

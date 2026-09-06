@@ -2,13 +2,25 @@
 
 Minimal proof-of-concept: validated `Image` → annotation platform → export → normalized `Annotation` in SQLite.
 
-| Platform | Local UI |
-|----------|----------|
-| **CVAT** | http://localhost:8080 |
+**Default local URLs** when using this repo’s Compose/demo as written (change the compose/port bindings if these ports are already taken):
+
+| Platform | Default local URL |
+|----------|-------------------|
 | **Label Studio** | http://localhost:8081 |
 | **Orchestrator demo** | http://127.0.0.1:5050 |
+| **CVAT** | http://localhost:8080 (only if your CVAT install uses that port) |
+
+On a cloud VM these will be different (e.g. a public hostname for Label Studio), not `localhost`.
 
 Design notes: [orchestrator-poc-cvat.md](../../docs/orchestrator/orchestrator-poc-cvat.md) · test summary: [poc-local-test-summary.md](../../docs/orchestrator/poc-local-test-summary.md)
+
+### Architecture diagrams (platforms & data flow)
+
+Paste Mermaid blocks into [mermaid.live](https://mermaid.live) to view or export. Hub in the org repo:
+
+- [Orchestrator docs hub](https://github.com/Abundance-Federation/dataset-infastructure/blob/main/docs/orchestrator/README.md)
+- [End-to-end flow (sequence)](https://github.com/Abundance-Federation/dataset-infastructure/blob/main/docs/orchestrator/flow-sequence.md) — Kindness → Kobo → Orchestrator → Label Studio → review
+- [Data model v0.3 (ER)](https://github.com/Abundance-Federation/dataset-infastructure/blob/main/docs/orchestrator/data-model-v0.3.md)
 
 ---
 

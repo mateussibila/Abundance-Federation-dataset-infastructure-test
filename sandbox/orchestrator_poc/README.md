@@ -12,7 +12,7 @@ Minimal proof-of-concept: validated `Image` → annotation platform → export �
 
 On a cloud VM these will be different (e.g. a public hostname for Label Studio), not `localhost`.
 
-Design notes: [orchestrator-poc-cvat.md](../../docs/orchestrator/orchestrator-poc-cvat.md) · test summary: [poc-local-test-summary.md](../../docs/orchestrator/poc-local-test-summary.md)
+Design notes: [docs/orchestrator/README.md](../../docs/orchestrator/README.md)
 
 ### Architecture diagrams (platforms & data flow)
 

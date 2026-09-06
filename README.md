@@ -10,7 +10,7 @@ Official pilot docs and production-facing code live in the org repo:
 | Path | Role |
 |------|------|
 | [`sandbox/orchestrator_poc/`](sandbox/orchestrator_poc/) | Orchestrator POC (Flask demo, adapters, SQLite) |
-| [`docs/orchestrator/`](docs/orchestrator/) | POC design notes and local test summary |
+| [`docs/orchestrator/`](docs/orchestrator/) | Consolidated POC notes (what we proved, design choices) |
 | [`sandbox/`](sandbox/) | Docker Compose helpers, dummy images, config *examples* |
 
 ## Reproduce the local POC

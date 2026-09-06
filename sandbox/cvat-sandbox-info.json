@@ -1,9 +1,0 @@
-{
-  "ui_url": "http://localhost:8080/tasks/4",
-  "project_url": "http://localhost:8080/projects/1",
-  "project_id": 1,
-  "task_id": 4,
-  "image_count": 20,
-  "username": "admin",
-  "password": "SandboxPass123!"
-}

@@ -1,0 +1,9 @@
+{
+  "base_url": "http://localhost:8081",
+  "public_base_url": "http://localhost:8081",
+  "username": "admin@local.test",
+  "password": "SandboxPass123!",
+  "api_token": "",
+  "project_id": null,
+  "project_title": "Abundance Orchestrator POC"
+}

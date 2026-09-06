@@ -208,3 +208,13 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# Label Studio / Orchestrator POC local runtime
+sandbox/label_studio_data/
+sandbox/label-studio-sandbox-info.json
+sandbox/kobo-sandbox-info.json
+sandbox/cvat-sandbox-info.json
+sandbox/orchestrator_poc/poc.db
+sandbox/orchestrator_poc/orchestrator_poc.db
+sandbox/orchestrator_poc/exports/
+sandbox/orchestrator_poc/kobo_media/

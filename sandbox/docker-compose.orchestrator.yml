@@ -1,12 +1,14 @@
-# Join the existing CVAT Compose network so webhooks avoid Docker Desktop
-# "Deny: Private Range" blocks to host.docker.internal.
+# Join existing CVAT network (optional for CVAT path) and Label Studio network.
 #
-# Usage (with CVAT already up):
-#   cd dataset-infastructure-test/sandbox
+# Usage:
+#   # Label Studio first
+#   docker compose -f docker-compose.label-studio.yml up -d
+#   # CVAT already up (optional for LS-only demos)
 #   docker compose -f docker-compose.orchestrator.yml up -d --build
 #
 # UI: http://127.0.0.1:5050
-# Webhook target (from CVAT): http://orchestrator_poc:5050/api/webhooks/cvat
+# CVAT webhook: http://orchestrator_poc:5050/api/webhooks/cvat
+# LS webhook:   http://orchestrator_poc:5050/api/webhooks/label_studio
 
 services:
   orchestrator_poc:
@@ -20,18 +22,29 @@ services:
       - ./orchestrator_poc:/app
       - ./cvat-dummy-images:/data/cvat-dummy-images:ro
       - ./cvat-sandbox-info.json:/data/cvat-sandbox-info.json:ro
+      - ./label-studio-sandbox-info.json:/data/label-studio-sandbox-info.json
+      - ./kobo-sandbox-info.json:/data/kobo-sandbox-info.json:ro
     environment:
       CVAT_CONFIG: /data/cvat-sandbox-info.json
       CVAT_API_BASE_URL: http://cvat_server:8080
       CVAT_PUBLIC_BASE_URL: http://localhost:8080
       WEBHOOK_TARGET_URL: http://orchestrator_poc:5050/api/webhooks/cvat
+      LABEL_STUDIO_CONFIG: /data/label-studio-sandbox-info.json
+      LABEL_STUDIO_API_BASE_URL: http://label-studio:8080
+      LABEL_STUDIO_PUBLIC_BASE_URL: http://localhost:8081
+      LS_WEBHOOK_TARGET_URL: http://orchestrator_poc:5050/api/webhooks/label_studio
+      KOBO_CONFIG: /data/kobo-sandbox-info.json
       DEMO_IMAGE_PATH: /data/cvat-dummy-images/sandbox_farmA_vol001_20250713_topdown_01.jpg
+      DEMO_PLATFORM: cvat
     networks:
-      cvat_cvat:
-        ipv4_address: 172.18.0.50
+      - cvat_cvat
+      - label_studio_net
     restart: unless-stopped
 
 networks:
   cvat_cvat:
     external: true
     name: cvat_cvat
+  label_studio_net:
+    external: true
+    name: label_studio_net

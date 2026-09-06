@@ -1,0 +1,6 @@
+{
+  "base_url": "https://eu.kobotoolbox.org",
+  "token": "REPLACE_WITH_KOBO_API_TOKEN",
+  "asset_uid": "REPLACE_WITH_FORM_ASSET_UID",
+  "start_date": "2026-06-25"
+}

@@ -69,19 +69,27 @@ class Database:
         citizen_ai_image_id: str,
         storage_path: str,
         metadata: dict[str, Any] | None = None,
+        workflow_state: str = "ingested",
     ) -> str:
         image_id = str(uuid.uuid4())
         metadata = metadata or {}
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO images (id, citizen_ai_image_id, storage_path, metadata_json)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO images (id, citizen_ai_image_id, storage_path, workflow_state, metadata_json)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(citizen_ai_image_id) DO UPDATE SET
                     storage_path = excluded.storage_path,
+                    workflow_state = excluded.workflow_state,
                     metadata_json = excluded.metadata_json
                 """,
-                (image_id, citizen_ai_image_id, storage_path, json.dumps(metadata)),
+                (
+                    image_id,
+                    citizen_ai_image_id,
+                    storage_path,
+                    workflow_state,
+                    json.dumps(metadata),
+                ),
             )
             row = conn.execute(
                 "SELECT id FROM images WHERE citizen_ai_image_id = ?",
@@ -116,17 +124,25 @@ class Database:
         external_project_id: str,
         external_task_id: str,
         handoff_url: str,
+        external_platform: str = "cvat",
     ) -> str:
         task_id = str(uuid.uuid4())
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO tasks (
-                    id, task_ref, external_project_id, external_task_id,
+                    id, task_ref, external_platform, external_project_id, external_task_id,
                     handoff_url, status
-                ) VALUES (?, ?, ?, ?, ?, 'queued_for_annotation')
+                ) VALUES (?, ?, ?, ?, ?, ?, 'queued_for_annotation')
                 """,
-                (task_id, task_ref, external_project_id, external_task_id, handoff_url),
+                (
+                    task_id,
+                    task_ref,
+                    external_platform,
+                    external_project_id,
+                    external_task_id,
+                    handoff_url,
+                ),
             )
         return task_id
 
@@ -239,7 +255,7 @@ class Database:
                 dict(row)
                 for row in conn.execute(
                     """
-                    SELECT a.*, i.citizen_ai_image_id, t.task_ref
+                    SELECT a.*, i.citizen_ai_image_id, t.task_ref, t.external_platform
                     FROM annotations a
                     JOIN images i ON i.id = a.image_id
                     JOIN tasks t ON t.id = a.task_id

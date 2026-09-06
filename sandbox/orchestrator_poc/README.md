@@ -1,116 +1,134 @@
-# Orchestrator POC (CVAT adapter)
+# Orchestrator POC (CVAT + Label Studio adapters)
 
-Minimal proof-of-concept: one validated `Image` → CVAT task → manual annotation → **COCO 1.0** export → normalized `Annotation` in SQLite.
+Minimal proof-of-concept: validated `Image` → annotation platform → export → normalized `Annotation` in SQLite.
 
-Full design: [orchestrator-poc-cvat.md](../../docs/orchestrator/orchestrator-poc-cvat.md)
+| Platform | Local UI |
+|----------|----------|
+| **CVAT** | http://localhost:8080 |
+| **Label Studio** | http://localhost:8081 |
+| **Orchestrator demo** | http://127.0.0.1:5050 |
 
-## Setup
+Design notes: [orchestrator-poc-cvat.md](../../docs/orchestrator/orchestrator-poc-cvat.md) · test summary: [poc-local-test-summary.md](../../docs/orchestrator/poc-local-test-summary.md)
+
+---
+
+## Prerequisites
+
+Install on your Mac (or Linux) before running anything:
+
+1. **Git**
+2. **Python 3.11+** (`python3 --version`)
+3. **Docker Desktop** (or Docker Engine + Compose v2) — must be **running** before `docker compose …`
+4. **(Optional, CVAT path)** A local [CVAT](https://github.com/cvat-ai/cvat) Community install via Docker Compose, typically under something like `~/cvat_sandbox/cvat`, listening on port **8080**. Create a superuser and note username/password.
+
+No other system packages are required; Python deps are only `requests` and `flask` (see `requirements.txt`).
+
+---
+
+## One-time setup
 
 ```bash
-cd dataset-infastructure/sandbox/orchestrator_poc
+git clone https://github.com/mateussibila/Abundance-Federation-dataset-infastructure-test.git
+cd Abundance-Federation-dataset-infastructure-test/sandbox
+
+# Config from examples (never commit the real files — they are gitignored)
+cp kobo-sandbox-info.json.example kobo-sandbox-info.json          # optional: Kobo pull
+cp label-studio-sandbox-info.example.json label-studio-sandbox-info.json
+cp cvat-sandbox-info.json.example cvat-sandbox-info.json            # if using CVAT
+# Edit the JSON files: tokens, passwords, asset_uid, etc.
+
+cd orchestrator_poc
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python orchestrator_poc.py init-db
 ```
 
-Requires local CVAT sandbox (`../cvat-sandbox-info.json`).
+---
 
-## Demo UI (screen recording)
-
-Side-by-side demo: **Orchestrator buttons on the left**, **CVAT browser on the right**.
+## Run Label Studio (port 8081)
 
 ```bash
-pip install -r requirements.txt
+cd ../   # sandbox/
+docker compose -f docker-compose.label-studio.yml up -d
+python3 scripts/bootstrap_label_studio.py
+# writes api_token + project_id into label-studio-sandbox-info.json
+# UI: http://localhost:8081
+```
+
+## Run the demo UI
+
+```bash
+cd orchestrator_poc
+source .venv/bin/activate
 python demo_app.py
-# open http://127.0.0.1:5050
+# open http://127.0.0.1:5050 — select Platform: CVAT or Label Studio
 ```
 
-Default demo task: **`TASK-0002`** (fresh ref for recording; change in `poc_service.py` if needed).
+### Optional: Orchestrator in Docker
 
-Buttons map to the demo flow. Annotations import automatically when the CVAT job is marked **completed** (no manual Pull button).
-
-## Commands (CLI)
+Needs Label Studio (and CVAT, if you use that path) networks already up:
 
 ```bash
-python orchestrator_poc.py seed-image \
-  --image-id CAI-WP01-IMG-000001 \
-  --path ../cvat-dummy-images/sandbox_farmA_vol001_20250713_topdown_01.jpg \
-  --farm farmA --volunteer-id vol001 --photo-type topdown
-
-python orchestrator_poc.py push --image-id CAI-WP01-IMG-000001 --task-ref TASK-0001
-
-# Annotate in browser at handoff_url, then:
-python orchestrator_poc.py pull --task-ref TASK-0001
-python orchestrator_poc.py status --task-ref TASK-0001
+cd sandbox
+docker compose -f docker-compose.label-studio.yml up -d
+# CVAT must already be running (creates cvat_cvat network)
+docker compose -f docker-compose.orchestrator.yml up -d --build
 ```
 
-## Minimum metadata sent to CVAT
+---
 
-- Image file
-- Filename (`CAI-WP01-IMG-000001.jpg`)
-- Task name (`TASK-0001`)
-- Labels (`weed`, `unknown`, `unclassifiable`)
+## Minimum test (Label Studio only)
 
-All other metadata stays in Orchestrator SQLite (`images.metadata_json`).
+CVAT is optional for a first pass.
 
-## Export format
+1. Start Docker Desktop → Label Studio compose → bootstrap → `demo_app.py`
+2. In the demo UI: **Initialize** → **Register image** → **Push** (platform = Label Studio)
+3. Open the LS task, submit a triage label (`valid_weed` / `invalid` / `unsure`)
+4. Confirm the Orchestrator pulls the annotation (webhook and/or poller)
+5. **Reset all** clears SQLite + LS tasks for the selected platform
 
-**COCO 1.0** — raw export saved under `exports/raw/`, normalized payload under `exports/normalized/` and in `annotations.payload_json`.
+### With CVAT
 
-## Resume demo later
+Same flow with platform = CVAT; complete the job in CVAT UI; Orchestrator imports COCO.
 
-Everything needed to re-run the screen recording is in this repo. CVAT itself lives outside the repo (`~/cvat_sandbox/cvat` via Docker Compose).
+### With Kobo
 
-### 1. Start CVAT (once per session)
+Fill `kobo-sandbox-info.json`, then use **Pull from Kobo → LS** in the demo UI.
 
-```bash
-open -a Docker   # if Docker Desktop is not running
-cd ~/cvat_sandbox/cvat
-docker compose up -d
-# UI: http://localhost:8080  (admin / see ../cvat-sandbox-info.json)
-```
+---
 
-### 2. Start Orchestrator demo UI
+## Demo flow (full)
 
-```bash
-cd dataset-infastructure/sandbox/orchestrator_poc
-source .venv/bin/activate   # or: python3 -m venv .venv && pip install -r requirements.txt
-python demo_app.py
-# open http://127.0.0.1:5050
-```
+1. **Initialize** — SQLite + register webhook for the selected platform  
+2. **Register image** — local `images` row  
+3. **Push** — creates task on CVAT or Label Studio  
+4. **Open** — annotate in the platform UI  
+5. Auto-pull on completed / submitted annotation (webhook + poller)  
+6. **Reset all** — wipe SQLite + delete tasks on the **selected platform only**
 
-If port 5050 is busy: `lsof -ti :5050 | xargs kill -9`
+Pipeline sketch: Kobo pull → LS triage → (manual) Push to CVAT → COCO import.
 
-### 3. Recording layout
+---
 
-- **Left:** Orchestrator demo UI (`http://127.0.0.1:5050`)
-- **Right:** CVAT in browser (`http://localhost:8080`)
-
-### 4. Demo flow (buttons)
-
-1. **Initialize** — create SQLite schema (POC only)
-2. **Register image** — local `images` row (no CVAT yet)
-3. **Push to CVAT** — creates task + uploads image
-4. **Enable webhook** — registers CVAT `update:job` → Orchestrator (once per project)
-5. **Open CVAT** — annotate, Save, then **Menu → Change job state → completed**
-6. Orchestrator **auto-pulls** COCO (activity log updates within ~2s; manual Pull still available)
-7. **Reset all** — wipe local SQLite + activity log **and delete all tasks** in the CVAT sandbox project
-
-Production rule: webhook fires on many job updates, but Orchestrator only pulls when **state → completed**. Save alone does not pull.
-
-Webhook URL (CVAT Docker → Mac): `http://host.docker.internal:5050/api/webhooks/cvat`
-
-### 5. Fresh task ref
-
-Default demo task refs auto-increment (`TASK-0001`, `TASK-0002`, …) from local DB + CVAT project names. After **Reset all**, the next push starts again at **`TASK-0001`**.
-
-### Files
+## Files
 
 | Path | Role |
 |------|------|
-| `demo_app.py` | Flask UI for recording |
-| `poc_service.py` | Business logic + activity log text |
-| `cvat_adapter.py` | CVAT REST API client |
-| `../cvat-sandbox-info.json` | Local CVAT URL + credentials |
-| `../cvat-dummy-images/` | Sample weed-like images |
+| `demo_app.py` | Flask UI |
+| `poc_service.py` | Business logic (Kobo→LS→CVAT gate) |
+| `kobo_adapter.py` | Kobo REST pull + media download |
+| `cvat_adapter.py` | CVAT REST |
+| `label_studio_adapter.py` | Label Studio REST (triage Choices) |
+| `normalize_coco.py` / `normalize_ls.py` | Export → canonical payload |
+| `../kobo-sandbox-info.json` | Kobo URL + token + asset (**gitignored**; use `.example`) |
+| `../label-studio-sandbox-info.json` | LS URL + token + project (**gitignored**) |
+| `../cvat-sandbox-info.json` | CVAT credentials (**gitignored**) |
+| `../docker-compose.label-studio.yml` | LS on :8081 |
+
+---
+
+## Notes / known limits
+
+- On Docker Desktop for Mac, CVAT webhooks to private IPs often fail; the demo **poller** (~4s) is a local workaround. Expect real webhooks on a normal VM network.
+- Do not commit `*-sandbox-info.json`, `*.db`, `label_studio_data/`, or `kobo_media/`.

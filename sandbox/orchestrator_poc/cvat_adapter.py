@@ -72,6 +72,41 @@ class CvatClient:
         )
         response.raise_for_status()
 
+    def ensure_project(self, *, title: str = "Abundance Orchestrator POC") -> int:
+        """Ensure sandbox CVAT project exists (recreate after Docker volume wipe)."""
+        self.login()
+        pid = int(self.config.project_id)
+        if pid > 0:
+            probe = self.session.get(
+                f"{self.config.base_url}/api/projects/{pid}",
+                headers=self._csrf_headers,
+                timeout=30,
+            )
+            if probe.status_code == 200:
+                return pid
+
+        listed = self.session.get(
+            f"{self.config.base_url}/api/projects",
+            params={"page_size": 100},
+            headers=self._csrf_headers,
+            timeout=30,
+        )
+        listed.raise_for_status()
+        for proj in listed.json().get("results") or []:
+            if proj.get("name") == title:
+                self.config.project_id = int(proj["id"])
+                return self.config.project_id
+
+        created = self.session.post(
+            f"{self.config.base_url}/api/projects",
+            json={"name": title, "labels": DEFAULT_LABELS},
+            headers={**self._csrf_headers, "Content-Type": "application/json"},
+            timeout=60,
+        )
+        created.raise_for_status()
+        self.config.project_id = int(created.json()["id"])
+        return self.config.project_id
+
     @property
     def _csrf_headers(self) -> dict[str, str]:
         csrf = self.session.cookies.get("csrftoken", "")
@@ -89,19 +124,19 @@ class CvatClient:
         upload_filename: str,
     ) -> PushResult:
         self.login()
+        project_id = self.ensure_project()
 
         create_task = self.session.post(
             f"{self.config.base_url}/api/tasks",
             json={
                 "name": task_name,
-                "project_id": self.config.project_id,
+                "project_id": project_id,
             },
             headers={**self._csrf_headers, "Content-Type": "application/json"},
             timeout=60,
         )
         create_task.raise_for_status()
         task_id = create_task.json()["id"]
-
         image_bytes = image_path.read_bytes()
         form_data = {
             "image_quality": "70",
@@ -127,7 +162,7 @@ class CvatClient:
         self._wait_for_task_ready(task_id)
         handoff_url = f"{self.config.browser_base_url}/tasks/{task_id}"
         return PushResult(
-            external_project_id=str(self.config.project_id),
+            external_project_id=str(project_id),
             external_task_id=str(task_id),
             handoff_url=handoff_url,
         )

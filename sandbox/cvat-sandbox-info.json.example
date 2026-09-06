@@ -1,0 +1,9 @@
+{
+  "ui_url": "http://localhost:8080",
+  "project_url": "http://localhost:8080/projects/1",
+  "project_id": 1,
+  "task_id": null,
+  "image_count": 0,
+  "username": "admin",
+  "password": "REPLACE_WITH_CVAT_PASSWORD"
+}

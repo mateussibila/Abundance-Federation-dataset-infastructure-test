@@ -1,0 +1,31 @@
+# Local Label Studio beside CVAT (different host port).
+#
+# Usage:
+#   cd dataset-infastructure-test/sandbox
+#   docker compose -f docker-compose.label-studio.yml up -d
+#   python3 scripts/bootstrap_label_studio.py
+#
+# UI: http://localhost:8081
+# API (from Orchestrator container): http://label-studio:8080
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: label-studio
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      LABEL_STUDIO_HOST: http://localhost:8081
+      CSRF_TRUSTED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
+    # Community 1.23 disables legacy Token auth; flag re-enables Authorization: Token …
+    command: ["label-studio", "--host", "http://localhost:8081", "--enable-legacy-api-token"]
+    volumes:
+      - ./label_studio_data:/label-studio/data
+      - ./cvat-dummy-images:/data/cvat-dummy-images:ro
+    networks:
+      - label_studio_net
+
+networks:
+  label_studio_net:
+    name: label_studio_net

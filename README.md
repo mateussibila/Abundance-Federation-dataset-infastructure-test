@@ -1,79 +1,20 @@
-# Pilot 01: Volunteer-Built Agricultural AI Dataset
+# Abundance Federation — dataset infrastructure (sandbox)
 
-## What This Is
+Personal / team **sandbox** for Orchestrator POCs, CVAT/Label Studio experiments, and throwaway tests.
 
-A micro-pilot testing whether structured volunteer processes can produce AI-ready image datasets that meet academic standards. We are starting with Irish weed identification for precision agriculture.
+Official pilot docs and production-facing code live in the org repo:  
+[`Abundance-Federation/dataset-infastructure`](https://github.com/Abundance-Federation/dataset-infastructure).
 
-**Duration:** 12 weeks (April–June 2026)  
-**Team:** 4 volunteer data scientists (L1–L4) + coordinator  
-**Oversight:** Prof. of Statistics (TCD), Prof. of Computer Science (UCD)
+## What’s here
 
-## Current Focus (Weeks 2–3)
+| Path | Role |
+|------|------|
+| [`sandbox/orchestrator_poc/`](sandbox/orchestrator_poc/) | Orchestrator POC (Flask demo, adapters, SQLite) |
+| [`docs/orchestrator/`](docs/orchestrator/) | POC design notes and stack sketches |
+| [`sandbox/`](sandbox/) | Docker Compose helpers, dummy images, config *examples* |
 
-Two paired teams working in parallel:
+## Reproduce the local POC
 
-| Team | Focus | Members |
-|------|-------|---------|
-| **Team A** | Data Collection & Ingestion | 1 × L3–4 + 1 × L1–2 |
-| **Team B** | Annotation Platform | 1 × L3–4 + 1 × L1–2 |
+See [`sandbox/orchestrator_poc/README.md`](sandbox/orchestrator_poc/README.md).
 
-**Status:** Structure and design phase — no production data yet.
-
-QA scripting and analysis are parked until domain experts and real data are available. Design docs are being prepared now.
-
-## Volunteer Levels
-
-| Level | Title | Description |
-|-------|-------|-------------|
-| L1 | Observer / Beginner | Follow written instructions, use web tools, report observations |
-| L2 | Contributor | Work independently on structured tasks, handle data files, write docs |
-| L3 | Practitioner | Write scripts, deploy tools, design protocols, coach L1–2 volunteers |
-| L4 | Steward | Design and run pilots independently, mentor L3 volunteers |
-
-## Repository Structure
-
-- `protocols/` — Data collection and annotation protocols
-- `scripts/ingestion/` — (to be built) KoboToolbox export, rename, and upload scripts
-- `scripts/setup/` — Environment setup, Label Studio configuration, and deployment scripts
-- `scripts/annotation/` — Annotation-related utilities and support scripts
-- `scripts/qa/` — Gold tracker and agreement tracker scripts (parked)
-- `notebooks/` — Analysis and ML notebooks (parked)
-- `docs/` — Meeting notes, decisions log, training materials
-- `templates/` — Dataset creation templates and reusable examples
-
-**Note:** Empty folders are maintained using `.gitkeep` files until working files are added.
-
-## Key Documents
-
-Core project documents are available in the shared project google drive. 
-Ask the coordinator for access
-
-## Getting Started
-
-1. Read the key documents
-2. Check the [Issues](../../issues) tab for your team’s tasks
-3. Filter issues by label: `team:collection` or `team:annotation`
-4. Update your issue with progress comments as you work
-
-## Team
-
-| Role | Person | Level |
-|------|--------|-------|
-| Coordinator | [Rick] | — |
-| Team A – L3–4 | TBD | L3–4 |
-| Team A – L1–2 | TBD | L1–2 |
-| Team B – L3–4 | TBD | L3–4 |
-| Team B – L1–2 | TBD | L1–2 |
-
-## First Tasks
-
-If you are new, start with:
-- Read the key documents
-- Check the Issues tab
-- Confirm which team you are on
-- Leave a short progress update on your assigned task
-
-## Project Management
-
-- [Decisions Log](docs/decisions.md) — Key decisions and why they were made
-- [Parking Lot](docs/parking-lot.md) — Ideas for future work (not in scope right now)
+Copy `sandbox/*.example.json` → real config files locally (gitignored; never commit tokens/passwords).

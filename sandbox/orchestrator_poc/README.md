@@ -26,12 +26,12 @@ Paste Mermaid blocks into [mermaid.live](https://mermaid.live) to view or export
 
 ## Prerequisites
 
-Install on your Mac (or Linux) before running anything:
+Install on your machine (macOS, Linux, or Windows with Docker Desktop / WSL2) before running anything:
 
-1. **Git**
-2. **Python 3.11+** (`python3 --version`)
-3. **Docker Desktop** (or Docker Engine + Compose v2) — must be **running** before `docker compose …`
-4. **(Optional, CVAT path)** A local [CVAT](https://github.com/cvat-ai/cvat) Community install via Docker Compose, typically under something like `~/cvat_sandbox/cvat`, listening on port **8080**. Create a superuser and note username/password.
+1. Git
+2. Python 3.11+ (`python3 --version` or `py -3 --version` on Windows)
+3. Docker Desktop (or Docker Engine + Compose v2) — must be running before `docker compose …`
+4. (Optional, CVAT path) A local [CVAT](https://github.com/cvat-ai/cvat) Community install via Docker Compose, typically under something like `~/cvat_sandbox/cvat`, listening on port 8080. Create a superuser and note username/password.
 
 No other system packages are required; Python deps are only `requests` and `flask` (see `requirements.txt`).
 
@@ -142,5 +142,5 @@ Pipeline sketch: Kobo pull → LS triage → (manual) Push to CVAT → COCO impo
 
 ## Notes / known limits
 
-- On Docker Desktop for Mac, CVAT webhooks to private IPs often fail; the demo **poller** (~4s) is a local workaround. Expect real webhooks on a normal VM network.
-- Do not commit `*-sandbox-info.json`, `*.db`, `label_studio_data/`, or `kobo_media/`.
+- **Webhooks vs poller:** When Label Studio or CVAT finishes an annotation, they can notify the Orchestrator with a webhook (HTTP callback). On a laptop with Docker Desktop (especially Mac), that callback often cannot reach the Orchestrator’s private/`localhost` address, so the demo also **polls** every few seconds as a workaround. On a normal cloud VM network, prefer real webhooks and treat the poller as optional.
+- **Do not commit local runtime files:** `*-sandbox-info.json` (tokens/passwords), `*.db` (SQLite), `label_studio_data/`, and `kobo_media/` stay on your machine only — they are gitignored. Use the `*.example.json` templates instead.
